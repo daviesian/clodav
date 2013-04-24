@@ -5,7 +5,12 @@
            [io.milton.http ResourceFactory HttpManager AuthenticationService]
            [io.milton.config HttpManagerBuilder]
            [io.milton.servlet ServletRequest ServletResponse]
-           [io.milton.resource Resource PropFindableResource GetableResource CollectionResource]))
+           [io.milton.resource
+            Resource
+            PropFindableResource
+            GetableResource
+            PutableResource
+            CollectionResource]))
 
 
 
@@ -28,8 +33,7 @@
       (getUniqueId [this] "uniqueID")
       (getName [this] "CHILD")
       (getModifiedDate [this] (java.util.Date.))
-      (checkRedirect [this request] nil)
-      ))
+      (checkRedirect [this request] nil)))
 
   (defn to-resource [name content]
     (reify
@@ -40,19 +44,20 @@
       (authenticate [this user pass] :authenticated)
       (authorise [this request method auth] true)
       (getRealm [this] "test@somewhere.com")
-      (getUniqueId [this] "uniqueID")
+      (getUniqueId [this] (str "file" name))
       (getName [this] name)
       (getModifiedDate [this] (java.util.Date.))
       (checkRedirect [this request] nil)
 
       GetableResource
-      (getContentLength [this] (count content))
-      (getContentType [this accepts] (println "GetContentType" name accepts) "text/plain")
-      (getMaxAgeSeconds [this auth] (println "GetMaxAge") 60)
+      (getContentLength [this] (Long/valueOf (count content)))
+      (getContentType [this accepts] (println "GetContentType" name) "text/plain")
+      (getMaxAgeSeconds [this auth] (println "GetMaxAge" name) nil)
       (sendContent [this out range params content-type]
-        (println "Send Content")
-        (.write (java.io.PrintWriter out) content)
+        (println "Send Content" out)
+        (.write out (.getBytes content))
         (.close out))
+
       ))
 
   (def rootResource
@@ -64,23 +69,28 @@
       (getChildren [this] (println "Get children")
         (let [file-resources (map #(to-resource % (get files %)) (keys files))]
           (java.util.ArrayList. file-resources)))
-      (child [this name] (println "Get Child" name) (get files name))
+      (child [this name] (println "Get Child ******* " name) (get files name))
 
       Resource
       (authenticate [this user pass] :authenticated)
       (authorise [this request method auth] true)
       (getRealm [this] "test@somewhere.com")
-      (getUniqueId [this] "uniqueID")
+      (getUniqueId [this] "ROOT")
       (getName [this] "")
       (getModifiedDate [this] (java.util.Date.))
       (checkRedirect [this request] nil)
-      ))
+
+      PutableResource
+      (createNew [this new-name in length content-type]
+        (println "Create new:" new-name " Length:" length " Content type:" content-type))))
 
   (def resource-factory (reify ResourceFactory
                           (getResource [this host path]
                             (println "REQ RESOURCE:" host path)
                             (cond (= path "/") rootResource
-                                  :else nil))))
+                                  :else (let [name    (.substring path 1)
+                                              content (get files name)]
+                                          (to-resource name content))))))
 
   (def http-manager-builder (HttpManagerBuilder.))
 
