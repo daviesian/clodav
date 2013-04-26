@@ -10,55 +10,45 @@
             PropFindableResource
             GetableResource
             PutableResource
-            CollectionResource]))
+            CollectionResource
+            ReplaceableResource]
+           ))
 
 
 
 
 (do
 
+  (defrecord FileResource [name content]
+    PropFindableResource
+    (getCreateDate [this] (java.util.Date.))
+
+    Resource
+    (authenticate [this user pass] :authenticated)
+    (authorise [this request method auth] true)
+    (getRealm [this] nil)
+    (getUniqueId [this] nil)
+    (getName [this] name)
+    (getModifiedDate [this] (java.util.Date.))
+    (checkRedirect [this request] nil)
+
+    GetableResource
+    (getContentLength [this] (Long/valueOf (count content)))
+    (getContentType [this accepts] (println "GetContentType" name) "text/plain")
+    (getMaxAgeSeconds [this auth] (println "GetMaxAge" name) nil)
+    (sendContent [this out range params content-type]
+      (println "Send Content" out)
+      (.write out (.getBytes content))
+      (.close out))
+
+    ReplaceableResource
+    (replaceContent [this in length]
+      (println "Replace Content" in length)))
+
+
   (def files
-    {"File 1.txt" "Here is the contents of file 1."
-     "File 2.txt" "Here is the contents of file 2."})
-
-  (def childResource
-    (reify
-      PropFindableResource
-      (getCreateDate [this] (java.util.Date.))
-
-      Resource
-      (authenticate [this user pass] :authenticated)
-      (authorise [this request method auth] true)
-      (getRealm [this] "test@somewhere.com")
-      (getUniqueId [this] "uniqueID")
-      (getName [this] "CHILD")
-      (getModifiedDate [this] (java.util.Date.))
-      (checkRedirect [this request] nil)))
-
-  (defn to-resource [name content]
-    (reify
-      PropFindableResource
-      (getCreateDate [this] (java.util.Date.))
-
-      Resource
-      (authenticate [this user pass] :authenticated)
-      (authorise [this request method auth] true)
-      (getRealm [this] "test@somewhere.com")
-      (getUniqueId [this] (str "file" name))
-      (getName [this] name)
-      (getModifiedDate [this] (java.util.Date.))
-      (checkRedirect [this request] nil)
-
-      GetableResource
-      (getContentLength [this] (Long/valueOf (count content)))
-      (getContentType [this accepts] (println "GetContentType" name) "text/plain")
-      (getMaxAgeSeconds [this auth] (println "GetMaxAge" name) nil)
-      (sendContent [this out range params content-type]
-        (println "Send Content" out)
-        (.write out (.getBytes content))
-        (.close out))
-
-      ))
+    (atom [{:name "File 1.txt" :content "Here is the contents of file 1."}
+           {:name "File 2.txt" :content "Here is the contents of file 2."}]))
 
   (def rootResource
     (reify
@@ -67,15 +57,17 @@
 
       CollectionResource
       (getChildren [this] (println "Get children")
-        (let [file-resources (map #(to-resource % (get files %)) (keys files))]
+        (let [file-resources (map map->FileResource @files)]
           (java.util.ArrayList. file-resources)))
-      (child [this name] (println "Get Child ******* " name) (get files name))
+      (child [this name]
+        (let [children (.getChildren this)]
+          (first (filter #(= (.getName %) name) children))))
 
       Resource
       (authenticate [this user pass] :authenticated)
       (authorise [this request method auth] true)
-      (getRealm [this] "test@somewhere.com")
-      (getUniqueId [this] "ROOT")
+      (getRealm [this] nil)
+      (getUniqueId [this] nil)
       (getName [this] "")
       (getModifiedDate [this] (java.util.Date.))
       (checkRedirect [this request] nil)
@@ -87,10 +79,11 @@
   (def resource-factory (reify ResourceFactory
                           (getResource [this host path]
                             (println "REQ RESOURCE:" host path)
-                            (cond (= path "/") rootResource
-                                  :else (let [name    (.substring path 1)
-                                              content (get files name)]
-                                          (to-resource name content))))))
+                            (let [path (clojure.string/replace path #"/$" "")]
+                              (cond (= path "") rootResource
+                                    :else (let [name    (.substring path 1)]
+                                            (.child rootResource name))))
+                            )))
 
   (def http-manager-builder (HttpManagerBuilder.))
 
